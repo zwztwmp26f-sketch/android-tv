@@ -30,12 +30,12 @@ class Prefs(ctx: Context) {
     var autoMin: Int
         get() = sp.getInt("auto", 2)
         set(v) = sp.edit().putInt("auto", v).apply()
-    // Moscow by default; change here (city picker is a planned feature)
+    // Красноярск by default; change here (city picker is a planned feature)
     var lat: String
-        get() = sp.getString("lat", "55.75")!!
+        get() = sp.getString("lat", "56.01")!!
         set(v) = sp.edit().putString("lat", v).apply()
     var lon: String
-        get() = sp.getString("lon", "37.62")!!
+        get() = sp.getString("lon", "92.87")!!
         set(v) = sp.edit().putString("lon", v).apply()
 }
 
@@ -93,11 +93,22 @@ private fun wxDesc(c: Int) = when (c) {
     in 85..86 -> "Снегопад"; else -> if (c >= 95) "Гроза" else "—"
 }
 
-fun weather(lat: String, lon: String): String? = try {
-    val u = URL("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code")
-    val c = u.openConnection() as HttpURLConnection
-    c.connectTimeout = 8000; c.readTimeout = 8000
-    val j = JSONObject(c.inputStream.bufferedReader().readText()).getJSONObject("current")
-    val t = Math.round(j.getDouble("temperature_2m")).toInt()
-    (if (t > 0) "+" else "") + t + "° " + wxDesc(j.getInt("weather_code"))
-} catch (e: Exception) { null }
+private fun httpGet(u: String): String {
+    val c = URL(u).openConnection() as HttpURLConnection
+    c.connectTimeout = 10000; c.readTimeout = 10000
+    c.setRequestProperty("User-Agent", "LiquidLauncher/0.2")
+    return c.inputStream.bufferedReader().use { it.readText() }
+}
+
+fun weather(lat: String, lon: String): String? {
+    try {
+        val j = JSONObject(httpGet("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code")).getJSONObject("current")
+        val t = Math.round(j.getDouble("temperature_2m")).toInt()
+        return (if (t > 0) "+" else "") + t + "° " + wxDesc(j.getInt("weather_code"))
+    } catch (e: Exception) { }
+    // запасной источник
+    return try {
+        val r = httpGet("https://wttr.in/$lat,$lon?format=%t+%C&lang=ru").trim()
+        if (r.length < 40 && r.contains("°")) r.replace("°C", "°") else null
+    } catch (e: Exception) { null }
+}

@@ -21,6 +21,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -88,7 +92,7 @@ fun Launcher(ctx: Context) {
     var wall by remember { mutableStateOf(prefs.wall) }
     var ping by remember { mutableStateOf(0) }
     var now by remember { mutableStateOf(Date()) }
-    var wx by remember { mutableStateOf<String?>(null) }
+    var wx by remember { mutableStateOf("…") }
     val files = remember(mode) { wallFiles(ctx) }
     val total = BUILTIN.size + files.size
     val fr = remember { FocusRequester() }
@@ -97,8 +101,9 @@ fun Launcher(ctx: Context) {
     LaunchedEffect(Unit) { while (true) { now = Date(); delay(5000) } }
     LaunchedEffect(Unit) {
         while (true) {
-            wx = withContext(Dispatchers.IO) { weather(prefs.lat, prefs.lon) } ?: wx
-            delay(1_800_000)
+            val r = withContext(Dispatchers.IO) { weather(prefs.lat, prefs.lon) }
+            if (r != null) { wx = r; delay(1_800_000) }
+            else { if (wx == "…") wx = "нет данных"; delay(60_000) }
         }
     }
     LaunchedEffect(auto, total) {
@@ -130,10 +135,12 @@ fun Launcher(ctx: Context) {
                         true
                     }
                     Key.DirectionUp, Key.DirectionDown -> {
-                        if (mode == Mode.Idle) {
+                        if (mode == Mode.Idle) { sel = 0; mode = Mode.Bar }
+                        else {
                             wall = (wall + if (e.key == Key.DirectionDown) 1 else total - 1) % total
                             prefs.wall = wall
-                        } else ping++
+                            ping++
+                        }
                         true
                     }
                     else -> false
@@ -146,8 +153,8 @@ fun Launcher(ctx: Context) {
 
         Column(Modifier.align(Alignment.TopCenter).padding(top = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             T(date, 26f * cs, FontWeight.Medium, 0.85f)
-            T(time, 150f * cs, FontWeight.Bold)
-            wx?.let { Box(Modifier.padding(top = 8.dp).glass(24.dp).padding(horizontal = 20.dp, vertical = 8.dp)) { T(it, 22f) } }
+            Clock(time, cs)
+            Box(Modifier.padding(top = 8.dp).glass(24.dp).padding(horizontal = 20.dp, vertical = 8.dp)) { T(wx, 22f) }
         }
 
         AnimatedVisibility(
@@ -155,9 +162,16 @@ fun Launcher(ctx: Context) {
             enter = fadeIn(tween(400)) + slideInVertically(spring(0.7f, 200f)) { it / 2 },
             exit = fadeOut(tween(500)) + slideOutVertically(tween(500)) { it / 3 }
         ) {
-            Row(Modifier.glass(36.dp).padding(horizontal = 28.dp, vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                (pinned + "").forEachIndexed { i, p -> BarItem(ctx, p, i == sel) }
-            }
+            val items = pinned + ""
+            val barW = minOf(132.dp * items.size + 48.dp, LocalConfiguration.current.screenWidthDp.dp * 0.92f)
+            val visible = ((barW.value - 48f) / 132f).toInt().coerceAtLeast(1)
+            val ls = rememberLazyListState()
+            LaunchedEffect(sel, mode) { if (mode == Mode.Bar) ls.animateScrollToItem((sel - visible / 2).coerceAtLeast(0)) }
+            LazyRow(
+                modifier = Modifier.width(barW).glass(36.dp), state = ls,
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
+            ) { itemsIndexed(items) { i, p -> BarItem(ctx, p, i == sel) } }
         }
 
         if (mode == Mode.Settings) Settings(
@@ -165,6 +179,23 @@ fun Launcher(ctx: Context) {
             hide, { hide = it; prefs.hideSec = it }, cs, { cs = it; prefs.clockScale = it },
             auto, { auto = it; prefs.autoMin = it }, wall, { wall = it; prefs.wall = it }, total
         ) { mode = Mode.Idle }
+    }
+}
+
+@Composable
+fun Clock(time: String, cs: Float) {
+    var on by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); on = !on } }
+    val a by animateFloatAsState(if (on) 1f else 0.2f, tween(450), label = "colon")
+    val parts = time.split(":")
+    val st = TextStyle(
+        color = Color.White.copy(alpha = 0.95f), fontSize = (150f * cs).sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-4).sp, fontFeatureSettings = "tnum",
+        shadow = Shadow(Color(0x55000000), Offset(0f, 4f), 24f))
+    Row(Modifier.padding(vertical = (22f * cs).dp).graphicsLayer(scaleY = 1.22f), verticalAlignment = Alignment.CenterVertically) {
+        BasicText(parts[0], style = st)
+        BasicText(":", Modifier.alpha(a).offset(y = (-8f * cs).dp), style = st)
+        BasicText(parts.getOrElse(1) { "00" }, style = st)
     }
 }
 
